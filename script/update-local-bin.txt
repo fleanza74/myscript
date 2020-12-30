@@ -1,0 +1,359 @@
+#!/usr/bin/env bash
+
+set -E
+trap 'print_error ${?} ${LINENO}' ERR
+trap 'print_report' EXIT
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+# Settings
+BIN_DIR="/media/dev/bin"
+BASH_COMPLETION_DIR="/media/dev/data/bash/completion"
+BASH_COMPLETIONS="eksctl helm kubectl minikube npm skaffold"
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+print_error()
+{
+    CODE="$(pr -tn "${0}")"
+    STATUS="${1}"
+    LINE_NUMBER="${2}"
+    CONTEXT_LINES="5"
+
+    echo
+
+    echo_error "$(tput bold)Error - command exited with status ${STATUS} at line ${LINE_NUMBER}:"
+
+    tail -n +$((LINE_NUMBER - CONTEXT_LINES)) <<< "${CODE}" | head -n ${CONTEXT_LINES}
+    echo_error "$(tput bold)$(tail -n +$((LINE_NUMBER)) <<< "${CODE}" | head -n 1)"
+    tail -n +$((LINE_NUMBER + 1)) <<< "${CODE}" | head -n ${CONTEXT_LINES}
+
+    echo
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+check_bash_version()
+{
+    MIN_VERSION="4"
+
+    if [ "${BASH_VERSINFO[0]}" -lt "${MIN_VERSION}" ]; then
+        echo "Error: bash must be at least version ${MIN_VERSION}, current version is ${BASH_VERSINFO[0]}"
+        exit 1
+    fi
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+check_bin()
+{
+    if ! command -v "${1}" &> /dev/null; then
+        echo "Error: \"${1}\" is required but not installed."
+        exit 1
+    fi
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+echo_info()
+{
+    echo "$(tput setaf 6)${*}$(tput sgr0)"
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+echo_error()
+{
+    echo "$(tput setaf 1)${*}$(tput sgr0)"
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+print_report()
+{
+    {
+        print_version "aws-iam-authenticator" "${AWSIAM_VERSION_OLD}"         "${AWSIAM_VERSION_NEW}"
+        print_version "ctop"                  "${CTOP_VERSION_OLD}"           "${CTOP_VERSION_NEW}"
+        print_version "docker-compose"        "${DOCKER_COMPOSE_VERSION_OLD}" "${DOCKER_COMPOSE_VERSION_NEW}"
+        print_version "edgectl"               "${EDGECTL_VERSION_OLD}"        "${EDGECTL_VERSION_NEW}"
+        print_version "eksctl"                "${EKSCTL_VERSION_OLD}"         "${EKSCTL_VERSION_NEW}"
+        print_version "helm"                  "${HELM_VERSION_OLD}"           "${HELM_VERSION_NEW}"
+        print_version "hugo"                  "${HUGO_VERSION_OLD}"           "${HUGO_VERSION_NEW}"
+        print_version "istioctl"              "${ISTIOCTL_VERSION_OLD}"       "${ISTIOCTL_VERSION_NEW}"
+        print_version "jfrog"                 "${JFROG_VERSION_OLD}"          "${JFROG_VERSION_NEW}"
+        print_version "jq"                    "${JQ_VERSION_OLD}"             "${JQ_VERSION_NEW}"
+        print_version "kubectl"               "${KUBECTL_VERSION_OLD}"        "${KUBECTL_VERSION_NEW}"
+        print_version "minikube"              "${MINIKUBE_VERSION_OLD}"       "${MINIKUBE_VERSION_NEW}"
+        print_version "packer"                "${PACKER_VERSION_OLD}"         "${PACKER_VERSION_NEW}"
+        print_version "skaffold"              "${SKAFFOLD_VERSION_OLD}"       "${SKAFFOLD_VERSION_NEW}"
+        print_version "terraform"             "${TERRAFORM_VERSION_OLD}"      "${TERRAFORM_VERSION_NEW}"
+        print_version "vagrant"               "${VAGRANT_VERSION_OLD}"        "${VAGRANT_VERSION_NEW}"
+        print_version "yq"                    "${YQ_VERSION_OLD}"             "${YQ_VERSION_NEW}"
+    } | column -t -s ' '
+    echo
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+get_latest_github_version()
+{
+    PROJECT="${1}"
+    LATEST_VERSION="$(curl -s "https://github.com/${PROJECT}/releases/latest" | sed -E 's|.*releases/tag/(.*)".*|\1|')"
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+install_hashicorp_app()
+{
+    APP="${1}"
+
+    APP_VERSION="$(curl -s "https://checkpoint-api.hashicorp.com/v1/check/${APP}" | jq -r -M '.current_version')"
+    APP_VERSION="${APP_VERSION/v/}"
+    APP_URL="https://releases.hashicorp.com/${APP}/${APP_VERSION}/${APP}_${APP_VERSION}_linux_amd64.zip"
+
+    curl -sSL "${APP_URL}" -o "/tmp/${APP}.zip"
+
+    unzip -q -o "/tmp/${APP}.zip" -d "/tmp"
+    rm -f "/tmp/${APP}.zip"
+
+    mv -f "/tmp/${APP}" "${BIN_DIR}/${APP}"
+    chmod +x "${BIN_DIR}/${APP}"
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+install_bin()
+{
+    URL="${1}"
+    BIN_NAME="${2}"
+
+    curl -sSL "${URL}" -o "${BIN_DIR}/${BIN_NAME}"
+    chmod +x "${BIN_DIR}/${BIN_NAME}"
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+install_targz()
+{
+    URL="${1}"
+    SRC_BIN_PATH="${2}"
+    BIN_NAME="${3}"
+
+    TEMP_DIR="/tmp"
+
+    curl -sSL "${URL}" -o "${TEMP_DIR}/${BIN_NAME}.tar.gz"
+    mkdir -p "${TEMP_DIR}/${BIN_NAME}"
+    tar xzf "${TEMP_DIR}/${BIN_NAME}.tar.gz" -C "${TEMP_DIR}/${BIN_NAME}"
+    mv -f "${TEMP_DIR}/${BIN_NAME}/${SRC_BIN_PATH}" "${BIN_DIR}/${BIN_NAME}"
+    chmod +x "${BIN_DIR}/${BIN_NAME}"
+    rm -rf "${TEMP_DIR:?}/${BIN_NAME}"
+    rm -f "${TEMP_DIR}/${BIN_NAME}.tar.gz"
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+print_version()
+{
+    BIN=${1}
+    OLD_VERSION=${2}
+    NEW_VERSION=${3}
+
+    if [ -z "${OLD_VERSION}" ]; then
+        OLD_VERSION="None"
+    fi
+
+    if [ -z "${NEW_VERSION}" ]; then
+        NEW_VERSION="Error getting the new version"
+    fi
+
+    if [ "${OLD_VERSION}" = "${NEW_VERSION}" ]; then
+        echo "${BIN}: ${NEW_VERSION}"
+    else
+        echo "$(tput setaf 3)${BIN}: ${OLD_VERSION} -> ${NEW_VERSION}$(tput sgr0)"
+    fi
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+if [ ! -d "${BIN_DIR}" ]; then
+    mkdir -p "${BIN_DIR}"
+fi
+
+echo
+echo_info "Installing binaries"
+
+# Install jq
+echo "Installing jq"
+JQ_VERSION_OLD="$(jq --version 2> /dev/null | cut -d '-' -f 2)"
+get_latest_github_version "stedolan/jq"
+install_bin "https://github.com/stedolan/jq/releases/download/${LATEST_VERSION}/jq-linux64" \
+    "jq"
+JQ_VERSION_NEW="$(jq --version 2> /dev/null | cut -d '-' -f 2)"
+
+# Install aws-iam-authenticator
+echo "Installing aws-iam-authenticator"
+AWSIAM_VERSION_OLD="$(aws-iam-authenticator version 2> /dev/null | jq -r .Version)"
+get_latest_github_version "kubernetes-sigs/aws-iam-authenticator"
+install_bin "https://github.com/kubernetes-sigs/aws-iam-authenticator/releases/download/${LATEST_VERSION}/aws-iam-authenticator_${LATEST_VERSION:1}_linux_amd64" \
+    "aws-iam-authenticator"
+AWSIAM_VERSION_NEW="$(aws-iam-authenticator version 2> /dev/null | jq -r .Version)"
+
+# Install ctop
+echo "Installing ctop"
+CTOP_VERSION_OLD="$(ctop -v 2> /dev/null | cut -d ' ' -f 3 | sed 's/.$//')"
+get_latest_github_version "bcicen/ctop"
+install_bin "https://github.com/bcicen/ctop/releases/download/${LATEST_VERSION}/ctop-${LATEST_VERSION:1}-linux-amd64" \
+    "ctop"
+CTOP_VERSION_NEW="$(ctop -v 2> /dev/null | cut -d ' ' -f 3 | sed 's/.$//')"
+
+# Install docker-compose
+echo "Installing docker-compose"
+DOCKER_COMPOSE_VERSION_OLD="$(docker-compose version 2> /dev/null | head -n 1 | cut -d ' ' -f 3 | sed 's/.$//')"
+get_latest_github_version "docker/compose"
+install_bin "https://github.com/docker/compose/releases/download/${LATEST_VERSION}/docker-compose-Linux-x86_64" \
+    "docker-compose"
+DOCKER_COMPOSE_VERSION_NEW="$(docker-compose version 2> /dev/null | head -n 1 | cut -d ' ' -f 3 | sed 's/.$//')"
+
+# Install edgectl
+echo "Installing edgectl"
+EDGECTL_VERSION_OLD="$(edgectl version 2> /dev/null | head -n 1 | cut -d ' ' -f 2 | sed 's/^.//')"
+install_bin "https://metriton.datawire.io/downloads/linux/edgectl" \
+    "edgectl"
+EDGECTL_VERSION_NEW="$(edgectl version 2> /dev/null | head -n 1 | cut -d ' ' -f 2 | sed 's/^.//')"
+
+# Install eksctl
+echo "Installing eksctl"
+EKSCTL_VERSION_OLD="$(eksctl version 2> /dev/null | cut -d '"' -f 6)"
+install_targz "https://github.com/weaveworks/eksctl/releases/download/latest_release/eksctl_Linux_amd64.tar.gz" \
+    "eksctl" "eksctl"
+EKSCTL_VERSION_NEW="$(eksctl version 2> /dev/null | cut -d '"' -f 6)"
+
+# Install helm
+echo "Installing helm"
+HELM_VERSION_OLD="$(helm version 2> /dev/null | cut -d '"' -f 2 | sed 's/^.//')"
+get_latest_github_version "helm/helm"
+install_targz "https://get.helm.sh/helm-${LATEST_VERSION}-linux-amd64.tar.gz" \
+    "linux-amd64/helm" "helm"
+HELM_VERSION_NEW="$(helm version 2> /dev/null | cut -d '"' -f 2 | sed 's/^.//')"
+
+# Install hugo
+echo "Installing hugo"
+HUGO_VERSION_OLD="$(hugo version 2> /dev/null | cut -d ' ' -f 5 | cut -d '-' -f 1 | sed 's/^.//')"
+get_latest_github_version "gohugoio/hugo"
+install_targz "https://github.com/gohugoio/hugo/releases/download/${LATEST_VERSION}/hugo_${LATEST_VERSION:1}_Linux-64bit.tar.gz" \
+    "hugo" "hugo"
+HUGO_VERSION_NEW="$(hugo version 2> /dev/null | cut -d ' ' -f 5 | cut -d '-' -f 1 | sed 's/^.//')"
+
+# Install istioctl
+echo "Installing istioctl"
+ISTIOCTL_VERSION_OLD="$(istioctl version --short=true --remote=false 2> /dev/null || true)"
+get_latest_github_version "istio/istio"
+install_targz "https://github.com/istio/istio/releases/download/${LATEST_VERSION}/istioctl-${LATEST_VERSION}-linux.tar.gz" \
+    "istioctl" "istioctl"
+ISTIOCTL_VERSION_NEW="$(istioctl version --short=true --remote=false 2> /dev/null || true)"
+
+# Install jfrog
+echo "Installing jfrog"
+JFROG_VERSION_OLD="$(jfrog -v 2> /dev/null | cut -d ' ' -f 3)"
+install_bin "https://api.bintray.com/content/jfrog/jfrog-cli-go/\$latest/jfrog-cli-linux-amd64/jfrog?bt_package=jfrog-cli-linux-amd64" \
+    "jfrog"
+JFROG_VERSION_NEW="$(jfrog -v 2> /dev/null | cut -d ' ' -f 3)"
+
+# Install kubectl
+echo "Installing kubectl"
+KUBECTL_VERSION_OLD="$(kubectl version 2> /dev/null | grep "Client Version" | cut -d '"' -f 6 | sed 's/^.//')"
+KUBECTL_VERSION="$(curl -sSL https://storage.googleapis.com/kubernetes-release/release/stable.txt)"
+install_bin "https://storage.googleapis.com/kubernetes-release/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+    "kubectl"
+KUBECTL_VERSION_NEW="$(kubectl version 2> /dev/null | grep "Client Version" | cut -d '"' -f 6 | sed 's/^.//')"
+
+# Install minikube
+echo "Installing minikube"
+MINIKUBE_VERSION_OLD=$(minikube version 2> /dev/null | head -n 1 | cut -d ' ' -f 3 | sed 's/^.//')
+install_bin "https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64" \
+    "minikube"
+MINIKUBE_VERSION_NEW=$(minikube version 2> /dev/null | head -n 1 | cut -d ' ' -f 3 | sed 's/^.//')
+
+# Install packer
+echo "Installing packer"
+PACKER_VERSION_OLD="$(packer version 2> /dev/null | head -n 1 | cut -d ' ' -f 2 | sed 's/^.//')"
+install_hashicorp_app "packer"
+PACKER_VERSION_NEW="$(packer version 2> /dev/null | head -n 1 | cut -d ' ' -f 2 | sed 's/^.//')"
+
+# Install skaffold
+echo "Installing skaffold"
+SKAFFOLD_VERSION_OLD="$(skaffold version 2> /dev/null | sed 's/^.//')"
+install_bin "https://storage.googleapis.com/skaffold/releases/latest/skaffold-linux-amd64" \
+    "skaffold"
+SKAFFOLD_VERSION_NEW="$(skaffold version 2> /dev/null | sed 's/^.//')"
+
+# Install terraform
+echo "Installing terraform"
+TERRAFORM_VERSION_OLD="$(terraform -v 2> /dev/null | head -n 1 | cut -d ' ' -f 2 | sed 's/^.//')"
+install_hashicorp_app "terraform"
+TERRAFORM_VERSION_NEW="$(terraform -v 2> /dev/null | head -n 1 | cut -d ' ' -f 2 | sed 's/^.//')"
+
+# Install vagrant
+echo "Installing vagrant"
+VAGRANT_VERSION_OLD="$(vagrant -v 2> /dev/null | cut -d ' ' -f 2)"
+install_hashicorp_app "vagrant"
+VAGRANT_VERSION_NEW="$(vagrant -v 2> /dev/null | cut -d ' ' -f 2)"
+
+# Install yq
+echo "Installing yq"
+YQ_VERSION_OLD="$(yq --version 2> /dev/null | cut -d ' ' -f 3)"
+get_latest_github_version "mikefarah/yq"
+install_bin "https://github.com/mikefarah/yq/releases/download/${LATEST_VERSION}/yq_linux_amd64" \
+    "yq"
+YQ_VERSION_NEW="$(yq --version 2> /dev/null | cut -d ' ' -f 3)"
+
+# Generate bash completions
+echo
+echo_info "Generating bash completions"
+
+if [ ! -d "${BASH_COMPLETION_DIR}" ]; then
+    mkdir -p "${BASH_COMPLETION_DIR}"
+fi
+
+rm -f "${BASH_COMPLETION_DIR}"/*
+
+for COMPLETION in ${BASH_COMPLETIONS}; do
+    if [ -e "$(command -v "${COMPLETION}")" ]; then
+        echo "Generating ${COMPLETION} completion"
+        ${COMPLETION} completion bash > "${BASH_COMPLETION_DIR}/${COMPLETION}"
+    else
+        echo "${COMPLETION} completion not found"
+    fi
+done
+
+echo "Generating jfrog completion"
+export JFROG_CLI_HOME_DIR="${BASH_COMPLETION_DIR}"
+jfrog completion bash > /dev/null
+
+echo "Generating pip completion"
+pip completion --bash > "${BASH_COMPLETION_DIR}/pip"
+
+echo "Generating pip3 completion"
+pip3 completion --bash > "${BASH_COMPLETION_DIR}/pip3"
+
+echo "Generating istioctl completion"
+istioctl collateral --bash --outputDir "${BASH_COMPLETION_DIR}"
+
+echo "Generating docker-compose completion"
+get_latest_github_version "docker/compose"
+curl -sSL "https://raw.githubusercontent.com/docker/compose/${LATEST_VERSION}/contrib/completion/bash/docker-compose" \
+    -o "${BASH_COMPLETION_DIR}/docker-compose"
+
+# Report
+echo
+echo_info "Update completed"
+
+#-----------------------------------------------------------------------------------------------------------------------
+
+check_bash_version
+
+check_bin curl
+check_bin tar
+check_bin unzip
+
+#-----------------------------------------------------------------------------------------------------------------------
